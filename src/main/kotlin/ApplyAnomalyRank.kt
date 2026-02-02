@@ -3,13 +3,11 @@ import burp.api.montoya.MontoyaApi
 import burp.api.montoya.http.message.HttpRequestResponse
 import burp.api.montoya.ui.contextmenu.ContextMenuEvent
 import burp.api.montoya.ui.contextmenu.ContextMenuItemsProvider
-import burp.api.montoya.ui.contextmenu.MessageEditorHttpRequestResponse
-import burp.api.montoya.ui.settings.SettingsPanelBuilder
-import burp.api.montoya.ui.settings.SettingsPanelPersistence
 import com.nickcoblentz.montoya.LogLevel
 import com.nickcoblentz.montoya.MontoyaLogger
-import com.nickcoblentz.montoya.settings.PanelSettingsDelegate
+import kotlinx.coroutines.*
 import java.awt.Component
+import java.util.concurrent.Executors
 import javax.swing.JMenuItem
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
@@ -23,6 +21,7 @@ class ApplyAnomalyRank : BurpExtension, ContextMenuItemsProvider {
     private lateinit var api: MontoyaApi
     private lateinit var logger: MontoyaLogger
     private val applyAnomalyRankMenuItem = JMenuItem("Apply Anomaly Rank")
+    private val customAnomalyRankScope = CoroutineScope(Executors.newVirtualThreadPerTaskExecutor().asCoroutineDispatcher())
 
     //private val projectSettings : MyProjectSettings by lazy { MyProjectSettings() }
 
@@ -57,6 +56,10 @@ class ApplyAnomalyRank : BurpExtension, ContextMenuItemsProvider {
 
         api.userInterface().registerContextMenuItemsProvider(this)
 
+        api.extension().registerUnloadingHandler {
+            customAnomalyRankScope.cancel()
+        }
+
         // Just a simple hello world to start with
 
 
@@ -70,14 +73,15 @@ class ApplyAnomalyRank : BurpExtension, ContextMenuItemsProvider {
 
     @OptIn(ExperimentalTime::class)
     private fun applyAnomalyRank() {
-        Thread.ofVirtual().start {
+        customAnomalyRankScope.launch {
             val rankedRequests = api.utilities().rankingUtils().rank(requestResponses)
             val timestamp = Clock.System.now().epochSeconds
             val maxRank = rankedRequests.maxOf { it.rank() }
             val maxLength = maxRank.toString().length
 
             for (i in requestResponses.indices) {
-
+                //if (!isActive) break
+                ensureActive()
 
                 if (i < rankedRequests.size) {
                     val floatRank = rankedRequests[i].rank()
@@ -86,7 +90,6 @@ class ApplyAnomalyRank : BurpExtension, ContextMenuItemsProvider {
                     requestResponses[i].annotations()
                         .setNotes("Anom Rank $timestamp: ${String.format("%0${maxLength}d", floatRank)}")
                 }
-
             }
         }
     }
